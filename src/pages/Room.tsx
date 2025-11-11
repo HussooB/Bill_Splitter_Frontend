@@ -114,7 +114,6 @@ const Room: React.FC = () => {
 
     s.on("connect", () => {
       console.log("Socket connected:", s.id);
-      // Emit joinRoom with displayName
       s.emit("joinRoom", roomId, displayName);
     });
 
@@ -122,10 +121,11 @@ const Room: React.FC = () => {
 
     // --- Presence events ---
     s.on("userList", (users: string[]) => {
-      setOnlineUsers(users);
+      // show "You" for yourself, remove duplicates
+      const filtered = users.filter((u) => u !== displayName);
+      setOnlineUsers(filtered);
     });
 
-    // Only show toast for others joining
     s.on("userJoined", (name: string) => {
       if (name !== displayName) {
         toast({ title: `${name} joined the room` });
@@ -133,16 +133,24 @@ const Room: React.FC = () => {
     });
 
     s.on("userLeft", (name: string) => {
-      toast({ title: `${name} left the room` });
+      if (name !== displayName) {
+        toast({ title: `${name} left the room` });
+      }
     });
 
     // --- Message events ---
     s.on("receiveMessage", (msg: Message) => {
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => [
+        ...prev,
+        { ...msg, senderName: msg.senderName === displayName ? "You" : msg.senderName },
+      ]);
     });
 
     s.on("receiveProof", (proof: Message) => {
-      setMessages((prev) => [...prev, proof]);
+      setMessages((prev) => [
+        ...prev,
+        { ...proof, senderName: proof.senderName === displayName ? "You" : proof.senderName },
+      ]);
     });
 
     setSocket(s);
@@ -165,6 +173,7 @@ const Room: React.FC = () => {
         roomId,
       };
       socket.emit("sendMessage", msg);
+      setMessages((prev) => [...prev, { ...msg, senderName: "You" }]);
       setInput("");
     }
 
@@ -190,6 +199,7 @@ const Room: React.FC = () => {
         };
 
         socket.emit("sendProof", proofMsg);
+        setMessages((prev) => [...prev, { ...proofMsg, senderName: "You" }]);
         setFile(null);
         toast({ title: "File sent!" });
       } catch (err: any) {
@@ -212,11 +222,10 @@ const Room: React.FC = () => {
         </div>
 
         {/* 🧍 Online users */}
-        {onlineUsers.length > 0 && (
-          <div className="mt-2 text-sm text-muted-foreground">
-            <strong>Online:</strong> {onlineUsers.join(", ")}
-          </div>
-        )}
+        <div className="mt-2 text-sm text-muted-foreground">
+          <strong>Online:</strong> You
+          {onlineUsers.length ? ", " + onlineUsers.join(", ") : ""}
+        </div>
 
         {menuItems.length > 0 && (
           <div className="mt-2 space-y-1">
