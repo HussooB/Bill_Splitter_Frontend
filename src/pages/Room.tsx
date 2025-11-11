@@ -16,7 +16,6 @@ interface Message {
   text?: string;
   proofUrl?: string;
   createdAt: string;
-  roomId?: string;
 }
 
 interface MenuItem {
@@ -29,7 +28,7 @@ const Room: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [socket, setSocket] = useState<Socket | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -47,7 +46,7 @@ const Room: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch room and messages
+  // Fetch room info & messages
   useEffect(() => {
     if (!token) {
       toast({ title: "Unauthorized", description: "Please log in." });
@@ -94,7 +93,7 @@ const Room: React.FC = () => {
               createdAt: msg.createdAt || new Date().toISOString(),
             }))
             .sort(
-              (a: Message, b: Message) =>
+              (a, b) =>
                 new Date(a.createdAt).getTime() -
                 new Date(b.createdAt).getTime()
             )
@@ -108,11 +107,11 @@ const Room: React.FC = () => {
     fetchMessages();
   }, [roomId, token, toast, navigate]);
 
-  // Setup socket.io
+  // Setup socket
   useEffect(() => {
     if (!token) return;
 
-    const s: Socket = io(SOCKET_URL, {
+    const s = io(SOCKET_URL, {
       auth: { token },
       transports: ["websocket"],
     });
@@ -133,13 +132,11 @@ const Room: React.FC = () => {
     });
 
     s.on("userJoined", (name: string) => {
-      if (name !== displayName)
-        toast({ title: `${name} joined the room` });
+      toast({ title: `${name} joined the room` });
     });
 
     s.on("userLeft", (name: string) => {
-      if (name !== displayName)
-        toast({ title: `${name} left the room` });
+      toast({ title: `${name} left the room` });
     });
 
     // --- Message events ---
@@ -166,18 +163,19 @@ const Room: React.FC = () => {
     });
 
     setSocket(s);
+
     return () => {
       s.disconnect();
     };
   }, [roomId, token, displayName, toast]);
 
-  // --- Send messages or files ---
+  // Send message or file
   const handleSend = async () => {
     if (!socket || (!input.trim() && !file)) return;
 
     // Text message
     if (input.trim()) {
-      const msg: Message = {
+      const msg = {
         id: crypto.randomUUID(),
         senderName: displayName,
         text: input.trim(),
@@ -203,7 +201,7 @@ const Room: React.FC = () => {
         if (!res.ok) throw new Error("Failed to upload file");
         const data = await res.json();
 
-        const proofMsg: Message = {
+        const proofMsg = {
           id: data.proof.id,
           senderName: displayName,
           proofUrl: data.proof.fileUrl,
@@ -212,10 +210,7 @@ const Room: React.FC = () => {
         };
 
         socket.emit("sendProof", proofMsg);
-        setMessages((prev) => [
-          ...prev,
-          { ...proofMsg, senderName: "You" },
-        ]);
+        setMessages((prev) => [...prev, { ...proofMsg, senderName: "You" }]);
         setFile(null);
         toast({ title: "File sent!" });
       } catch (err: any) {
@@ -296,20 +291,16 @@ const Room: React.FC = () => {
         />
 
         <label className="relative cursor-pointer bg-gray-200 text-[10px] hover:bg-gray-300 px-3 py-2 rounded flex items-center gap-1">
-          <Paperclip size={14} />
+          <Paperclip />
           <span>{file ? file.name : "Attach file"}</span>
           <input
             type="file"
             className="absolute inset-0 opacity-0 cursor-pointer"
-            onChange={(e) => {
-              if (e.target.files && e.target.files[0])
-                setFile(e.target.files[0]);
-            }}
+            onChange={(e) => e.target.files && setFile(e.target.files[0])}
           />
           {file && (
             <X
-              className="ml-2 cursor-pointer"
-              size={14}
+              className="ml-2"
               onClick={(e) => {
                 e.stopPropagation();
                 setFile(null);
