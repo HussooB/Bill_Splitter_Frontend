@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Paperclip, X } from "lucide-react";
 
 const API_URL = "https://bill-splitter-backend-9b7b.onrender.com/api";
+const SOCKET_URL = "https://bill-splitter-backend-9b7b.onrender.com";
 
 interface Message {
   id: string;
@@ -27,6 +28,7 @@ const Room: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [socket, setSocket] = useState<Socket | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -35,20 +37,13 @@ const Room: React.FC = () => {
   const [roomTitle, setRoomTitle] = useState("");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [displayName, setDisplayName] = useState(localStorage.getItem("userName") || "You");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const token = localStorage.getItem("token");
 
-  // Scroll to bottom
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   useEffect(scrollToBottom, [messages]);
 
-  // Sort messages by createdAt
-  const sortedMessages = [...messages].sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
-
-  // Fetch room info and messages
+  // --- Fetch room and past messages ---
   useEffect(() => {
     if (!token) {
       toast({ title: "Unauthorized", description: "Please log in." });
@@ -94,7 +89,7 @@ const Room: React.FC = () => {
             createdAt: msg.createdAt || new Date().toISOString(),
           }))
         );
-      } catch (err: any) {
+      } catch (err) {
         console.error(err);
       }
     };
@@ -103,71 +98,58 @@ const Room: React.FC = () => {
     fetchMessages();
   }, [roomId, token, toast, navigate]);
 
-  // Initialize Socket.IO
+  // --- Socket setup ---
   useEffect(() => {
     if (!token) return;
 
-    const s = io("https://bill-splitter-backend-9b7b.onrender.com", {
+    const s = io(SOCKET_URL, {
       auth: { token },
-      transports: ["websocket"], // Force WebSocket for real-time
+      transports: ["websocket"],
     });
 
     s.on("connect", () => {
       console.log("Socket connected:", s.id);
-      // Join room with ack callback
-      s.emit("joinRoom", roomId, () => {
-        console.log("Joined room successfully");
-      });
+      s.emit("joinRoom", roomId, () => console.log("Joined room:", roomId));
     });
 
     s.on("connect_error", (err) => console.error("Socket connect error:", err));
-    s.on("error", (err) => console.error("Socket error:", err));
-
-    // Receive new messages
     s.on("newMessage", (msg: Message) => {
-      console.log("Received new message:", msg);
-      if (!msg.createdAt) msg.createdAt = new Date().toISOString();
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
+      console.log("🟢 Received message:", msg);
+      setMessages((prev) => [...prev, msg]);
     });
 
-    // Receive new proofs (files)
     s.on("newProof", (proof: any) => {
       const newMsg: Message = {
         id: proof.id,
-        senderName: proof.sender?.name || displayName,
-        proofUrl: proof.fileUrl,
+        senderName: proof.senderName || displayName,
+        proofUrl: proof.proofUrl,
         createdAt: proof.createdAt || new Date().toISOString(),
       };
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === newMsg.id)) return prev;
-        return [...prev, newMsg];
-      });
+      setMessages((prev) => [...prev, newMsg]);
     });
 
     setSocket(s);
-
     return () => {
       s.disconnect();
     };
   }, [roomId, token, displayName]);
 
-  // Unified send: text + optional file
+  // --- Send messages or file proofs ---
   const handleSend = async () => {
     if (!input.trim() && !file) return;
 
-    // Send text message
     if (input.trim() && socket) {
-      const msg: Message = { id: crypto.randomUUID(), senderName: displayName, text: input, createdAt: new Date().toISOString() };
-      // include roomId in the emitted payload but keep the Message type free of roomId
+      const msg: Message = {
+        id: crypto.randomUUID(),
+        senderName: displayName,
+        text: input,
+        createdAt: new Date().toISOString(),
+      };
       socket.emit("sendMessage", { ...msg, roomId });
       setMessages((prev) => [...prev, msg]);
       setInput("");
     }
 
-    // Send file
     if (file && token) {
       const formData = new FormData();
       formData.append("file", file);
@@ -181,16 +163,17 @@ const Room: React.FC = () => {
         if (!res.ok) throw new Error("Failed to upload file");
         const data = await res.json();
 
-        const newMsg: Message = {
+        const proofMsg: Message = {
           id: data.proof.id,
           senderName: displayName,
           proofUrl: data.proof.fileUrl,
           createdAt: data.proof.createdAt,
         };
 
-        setMessages((prev) => [...prev, newMsg]);
-        toast({ title: "File sent!" });
+        socket?.emit("sendProof", { ...proofMsg, roomId });
+        setMessages((prev) => [...prev, proofMsg]);
         setFile(null);
+        toast({ title: "File sent!" });
       } catch (err: any) {
         console.error(err);
         toast({ title: "Error sending file", description: err.message });
@@ -205,7 +188,9 @@ const Room: React.FC = () => {
       <header className="mb-4">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold">{roomTitle}</h1>
-          <Button variant="ghost" onClick={() => navigate("/rooms")}>Back</Button>
+          <Button variant="ghost" onClick={() => navigate("/rooms")}>
+            Back
+          </Button>
         </div>
 
         {menuItems.length > 0 && (
@@ -215,15 +200,13 @@ const Room: React.FC = () => {
                 {item.name}: ${item.price.toFixed(2)}
               </p>
             ))}
-            <p className="font-bold text-muted-foreground">
-              Total: ${totalBill.toFixed(2)}
-            </p>
+            <p className="font-bold text-muted-foreground">Total: ${totalBill.toFixed(2)}</p>
           </div>
         )}
       </header>
 
       <div className="flex-1 overflow-y-auto mb-4 space-y-2">
-        {sortedMessages.map((msg) => (
+        {messages.map((msg) => (
           <Card key={msg.id} className="p-3">
             <div className="flex justify-between items-center">
               <span className="font-semibold">{msg.senderName}</span>
@@ -265,7 +248,9 @@ const Room: React.FC = () => {
           )}
         </label>
 
-        <Button onClick={handleSend} disabled={!input.trim() && !file}>Send</Button>
+        <Button onClick={handleSend} disabled={!input.trim() && !file}>
+          Send
+        </Button>
       </div>
     </div>
   );
