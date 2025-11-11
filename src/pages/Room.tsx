@@ -149,7 +149,7 @@ const Room: React.FC = () => {
     });
 
     s.on("receiveProof", (proof: Message) => {
-      if (proof.senderName === displayName) return; // skip own proofs
+      // ✅ prevent duplicates for files too
       setMessages((prev) =>
         prev.some((m) => m.id === proof.id) ? prev : [...prev, proof]
       );
@@ -203,9 +203,14 @@ const Room: React.FC = () => {
           roomId,
         };
 
-        // Add locally first
-        setMessages((prev) => [...prev, proofMsg]);
+        // ✅ Don't re-add if socket will send it back
         socket.emit("sendProof", proofMsg);
+        setMessages((prev) =>
+          prev.some((m) => m.id === proofMsg.id)
+            ? prev
+            : [...prev, proofMsg]
+        );
+
         setFile(null);
         toast({ title: "File sent!" });
       } catch (err: any) {
