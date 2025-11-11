@@ -36,14 +36,14 @@ const Room: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [roomTitle, setRoomTitle] = useState("");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [displayName, setDisplayName] = useState(localStorage.getItem("userName") || "You");
+  const [displayName] = useState(localStorage.getItem("userName") || "You");
 
   const token = localStorage.getItem("token");
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   useEffect(scrollToBottom, [messages]);
 
-  // --- Fetch room and past messages ---
+  // --- Fetch room & past messages ---
   useEffect(() => {
     if (!token) {
       toast({ title: "Unauthorized", description: "Please log in." });
@@ -81,13 +81,15 @@ const Room: React.FC = () => {
         if (!res.ok) throw new Error("Failed to fetch messages");
         const data = await res.json();
         setMessages(
-          data.messages.map((msg: any) => ({
-            id: msg.id,
-            senderName: msg.senderName || msg.sender?.name || "Unknown",
-            text: msg.text,
-            proofUrl: msg.proofUrl || msg.fileUrl,
-            createdAt: msg.createdAt || new Date().toISOString(),
-          }))
+          data.messages
+            .map((msg: any) => ({
+              id: msg.id,
+              senderName: msg.senderName || msg.sender?.name || "Unknown",
+              text: msg.text,
+              proofUrl: msg.proofUrl || msg.fileUrl,
+              createdAt: msg.createdAt || new Date().toISOString(),
+            }))
+            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
         );
       } catch (err) {
         console.error(err);
@@ -113,44 +115,52 @@ const Room: React.FC = () => {
     });
 
     s.on("connect_error", (err) => console.error("Socket connect error:", err));
+
     s.on("newMessage", (msg: Message) => {
-      console.log("🟢 Received message:", msg);
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) =>
+        [...prev, msg].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        )
+      );
     });
 
     s.on("newProof", (proof: any) => {
       const newMsg: Message = {
         id: proof.id,
-        senderName: proof.senderName || displayName,
+        senderName: proof.senderName || "Unknown",
         proofUrl: proof.proofUrl,
         createdAt: proof.createdAt || new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, newMsg]);
+      setMessages((prev) =>
+        [...prev, newMsg].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        )
+      );
     });
 
     setSocket(s);
     return () => {
       s.disconnect();
     };
-  }, [roomId, token, displayName]);
+  }, [roomId, token]);
 
-  // --- Send messages or file proofs ---
+  // --- Send messages / files ---
   const handleSend = async () => {
-    if (!input.trim() && !file) return;
+    if (!socket || (!input.trim() && !file)) return;
 
-    if (input.trim() && socket) {
-      const msg: Message = {
+    if (input.trim()) {
+      const msg = {
         id: crypto.randomUUID(),
         senderName: displayName,
-        text: input,
+        text: input.trim(),
         createdAt: new Date().toISOString(),
+        roomId,
       };
-      socket.emit("sendMessage", { ...msg, roomId });
-      setMessages((prev) => [...prev, msg]);
+      socket.emit("sendMessage", msg);
       setInput("");
     }
 
-    if (file && token) {
+    if (file) {
       const formData = new FormData();
       formData.append("file", file);
 
@@ -163,15 +173,15 @@ const Room: React.FC = () => {
         if (!res.ok) throw new Error("Failed to upload file");
         const data = await res.json();
 
-        const proofMsg: Message = {
+        const proofMsg = {
           id: data.proof.id,
           senderName: displayName,
           proofUrl: data.proof.fileUrl,
           createdAt: data.proof.createdAt,
+          roomId,
         };
 
-        socket?.emit("sendProof", { ...proofMsg, roomId });
-        setMessages((prev) => [...prev, proofMsg]);
+        socket.emit("sendProof", proofMsg);
         setFile(null);
         toast({ title: "File sent!" });
       } catch (err: any) {
@@ -200,7 +210,9 @@ const Room: React.FC = () => {
                 {item.name}: ${item.price.toFixed(2)}
               </p>
             ))}
-            <p className="font-bold text-muted-foreground">Total: ${totalBill.toFixed(2)}</p>
+            <p className="font-bold text-muted-foreground">
+              Total: ${totalBill.toFixed(2)}
+            </p>
           </div>
         )}
       </header>
@@ -215,7 +227,13 @@ const Room: React.FC = () => {
               </span>
             </div>
             {msg.text && <p className="mt-1">{msg.text}</p>}
-            {msg.proofUrl && <img src={msg.proofUrl} alt="proof" className="mt-2 max-h-48" />}
+            {msg.proofUrl && (
+              <img
+                src={msg.proofUrl}
+                alt="proof"
+                className="mt-2 max-h-48 rounded border"
+              />
+            )}
           </Card>
         ))}
         <div ref={messagesEndRef} />
