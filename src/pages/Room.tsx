@@ -36,6 +36,7 @@ const Room: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [roomTitle, setRoomTitle] = useState("");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [displayName] = useState(localStorage.getItem("userName") || "You");
 
   const token = localStorage.getItem("token");
@@ -43,7 +44,7 @@ const Room: React.FC = () => {
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   useEffect(scrollToBottom, [messages]);
 
-  // --- Fetch room & past messages ---
+  // --- Fetch room info & past messages ---
   useEffect(() => {
     if (!token) {
       toast({ title: "Unauthorized", description: "Please log in." });
@@ -111,40 +112,40 @@ const Room: React.FC = () => {
 
     s.on("connect", () => {
       console.log("Socket connected:", s.id);
-      s.emit("joinRoom", roomId, () => console.log("Joined room:", roomId));
+      s.emit("joinRoom", roomId, displayName);
     });
 
     s.on("connect_error", (err) => console.error("Socket connect error:", err));
 
-    s.on("newMessage", (msg: Message) => {
-      setMessages((prev) =>
-        [...prev, msg].sort(
-          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        )
-      );
+    // ✅ Presence events
+    s.on("userList", (users: string[]) => {
+      setOnlineUsers(users);
     });
 
-    s.on("newProof", (proof: any) => {
-      const newMsg: Message = {
-        id: proof.id,
-        senderName: proof.senderName || "Unknown",
-        proofUrl: proof.proofUrl,
-        createdAt: proof.createdAt || new Date().toISOString(),
-      };
-      setMessages((prev) =>
-        [...prev, newMsg].sort(
-          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        )
-      );
+    s.on("userJoined", (name: string) => {
+      toast({ title: `${name} joined the room` });
+    });
+
+    s.on("userLeft", (name: string) => {
+      toast({ title: `${name} left the room` });
+    });
+
+    // ✅ Message events
+    s.on("receiveMessage", (msg: Message) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+
+    s.on("receiveProof", (proof: Message) => {
+      setMessages((prev) => [...prev, proof]);
     });
 
     setSocket(s);
     return () => {
       s.disconnect();
     };
-  }, [roomId, token]);
+  }, [roomId, token, displayName, toast]);
 
-  // --- Send messages / files ---
+  // --- Send messages & files ---
   const handleSend = async () => {
     if (!socket || (!input.trim() && !file)) return;
 
@@ -202,6 +203,13 @@ const Room: React.FC = () => {
             Back
           </Button>
         </div>
+
+        {/* 🧍 Online users */}
+        {onlineUsers.length > 0 && (
+          <div className="mt-2 text-sm text-muted-foreground">
+            <strong>Online:</strong> {onlineUsers.join(", ")}
+          </div>
+        )}
 
         {menuItems.length > 0 && (
           <div className="mt-2 space-y-1">
