@@ -125,7 +125,7 @@ const Room: React.FC = () => {
       console.error("Socket connect error:", err)
     );
 
-    // --- Presence events ---
+    // Presence
     s.on("userList", (users: string[]) => {
       const filtered = users.filter((u) => u !== displayName);
       setOnlineUsers(filtered);
@@ -139,27 +139,33 @@ const Room: React.FC = () => {
       toast({ title: `${name} left the room` });
     });
 
-    // --- Message events ---
+    // Message events
     s.on("receiveMessage", (msg: Message) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          ...msg,
-          senderName:
-            msg.senderName === displayName ? "You" : msg.senderName,
-        },
-      ]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev; // prevent duplicates
+        return [
+          ...prev,
+          {
+            ...msg,
+            senderName:
+              msg.senderName === displayName ? "You" : msg.senderName,
+          },
+        ];
+      });
     });
 
     s.on("receiveProof", (proof: Message) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          ...proof,
-          senderName:
-            proof.senderName === displayName ? "You" : proof.senderName,
-        },
-      ]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === proof.id)) return prev; // prevent duplicates
+        return [
+          ...prev,
+          {
+            ...proof,
+            senderName:
+              proof.senderName === displayName ? "You" : proof.senderName,
+          },
+        ];
+      });
     });
 
     setSocket(s);
@@ -183,7 +189,6 @@ const Room: React.FC = () => {
         roomId,
       };
       socket.emit("sendMessage", msg);
-      setMessages((prev) => [...prev, { ...msg, senderName: "You" }]);
       setInput("");
     }
 
@@ -210,7 +215,6 @@ const Room: React.FC = () => {
         };
 
         socket.emit("sendProof", proofMsg);
-        setMessages((prev) => [...prev, { ...proofMsg, senderName: "You" }]);
         setFile(null);
         toast({ title: "File sent!" });
       } catch (err: any) {
