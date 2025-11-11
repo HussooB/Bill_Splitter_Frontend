@@ -160,8 +160,9 @@ const Room: React.FC = () => {
 
     // Send text message
     if (input.trim() && socket) {
-      const msg: Message = { id: crypto.randomUUID(), roomId, senderName: displayName, text: input, createdAt: new Date().toISOString() };
-      socket.emit("sendMessage", msg);
+      const msg: Message = { id: crypto.randomUUID(), senderName: displayName, text: input, createdAt: new Date().toISOString() };
+      // include roomId in the emitted payload but keep the Message type free of roomId
+      socket.emit("sendMessage", { ...msg, roomId });
       setMessages((prev) => [...prev, msg]);
       setInput("");
     }
