@@ -41,8 +41,10 @@ const Room: React.FC = () => {
 
   const token = localStorage.getItem("token");
 
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  useEffect(scrollToBottom, [messages]);
+  // Scroll to bottom whenever messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // --- Fetch room info & past messages ---
   useEffect(() => {
@@ -112,25 +114,29 @@ const Room: React.FC = () => {
 
     s.on("connect", () => {
       console.log("Socket connected:", s.id);
+      // Emit joinRoom with displayName
       s.emit("joinRoom", roomId, displayName);
     });
 
     s.on("connect_error", (err) => console.error("Socket connect error:", err));
 
-    // ✅ Presence events
+    // --- Presence events ---
     s.on("userList", (users: string[]) => {
       setOnlineUsers(users);
     });
 
+    // Only show toast for others joining
     s.on("userJoined", (name: string) => {
-      toast({ title: `${name} joined the room` });
+      if (name !== displayName) {
+        toast({ title: `${name} joined the room` });
+      }
     });
 
     s.on("userLeft", (name: string) => {
       toast({ title: `${name} left the room` });
     });
 
-    // ✅ Message events
+    // --- Message events ---
     s.on("receiveMessage", (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
     });
@@ -140,6 +146,7 @@ const Room: React.FC = () => {
     });
 
     setSocket(s);
+
     return () => {
       s.disconnect();
     };
