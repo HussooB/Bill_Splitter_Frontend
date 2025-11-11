@@ -10,7 +10,7 @@ import { Paperclip, X } from "lucide-react";
 const API_URL = "https://bill-splitter-backend-9b7b.onrender.com/api";
 
 interface Message {
-  id?: string;
+  id: string;
   senderName: string;
   text?: string;
   proofUrl?: string;
@@ -34,16 +34,13 @@ const Room: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [roomTitle, setRoomTitle] = useState("");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [displayName, setDisplayName] = useState(
-    localStorage.getItem("userName") || "You"
-  );
+  const [displayName, setDisplayName] = useState(localStorage.getItem("userName") || "You");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const token = localStorage.getItem("token");
 
   // Scroll to bottom
-  const scrollToBottom = () =>
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   useEffect(scrollToBottom, [messages]);
 
   // Sort messages by createdAt
@@ -109,14 +106,26 @@ const Room: React.FC = () => {
   // Initialize Socket.IO
   useEffect(() => {
     if (!token) return;
+
     const s = io("https://bill-splitter-backend-9b7b.onrender.com", {
       auth: { token },
+      transports: ["websocket"], // Force WebSocket for real-time
     });
 
-    s.on("connect", () => console.log("Socket connected:", s.id));
-    s.emit("joinRoom", roomId);
+    s.on("connect", () => {
+      console.log("Socket connected:", s.id);
+      // Join room with ack callback
+      s.emit("joinRoom", roomId, () => {
+        console.log("Joined room successfully");
+      });
+    });
 
+    s.on("connect_error", (err) => console.error("Socket connect error:", err));
+    s.on("error", (err) => console.error("Socket error:", err));
+
+    // Receive new messages
     s.on("newMessage", (msg: Message) => {
+      console.log("Received new message:", msg);
       if (!msg.createdAt) msg.createdAt = new Date().toISOString();
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
@@ -124,6 +133,7 @@ const Room: React.FC = () => {
       });
     });
 
+    // Receive new proofs (files)
     s.on("newProof", (proof: any) => {
       const newMsg: Message = {
         id: proof.id,
@@ -138,6 +148,7 @@ const Room: React.FC = () => {
     });
 
     setSocket(s);
+
     return () => {
       s.disconnect();
     };
@@ -149,9 +160,9 @@ const Room: React.FC = () => {
 
     // Send text message
     if (input.trim() && socket) {
-      const msg = { roomId, senderName: displayName, text: input };
+      const msg: Message = { id: crypto.randomUUID(), roomId, senderName: displayName, text: input, createdAt: new Date().toISOString() };
       socket.emit("sendMessage", msg);
-      setMessages((prev) => [...prev, { ...msg, createdAt: new Date().toISOString() }]);
+      setMessages((prev) => [...prev, msg]);
       setInput("");
     }
 
@@ -169,16 +180,14 @@ const Room: React.FC = () => {
         if (!res.ok) throw new Error("Failed to upload file");
         const data = await res.json();
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: data.proof.id,
-            senderName: displayName,
-            proofUrl: data.proof.fileUrl,
-            createdAt: data.proof.createdAt,
-          },
-        ]);
+        const newMsg: Message = {
+          id: data.proof.id,
+          senderName: displayName,
+          proofUrl: data.proof.fileUrl,
+          createdAt: data.proof.createdAt,
+        };
 
+        setMessages((prev) => [...prev, newMsg]);
         toast({ title: "File sent!" });
         setFile(null);
       } catch (err: any) {
@@ -188,7 +197,6 @@ const Room: React.FC = () => {
     }
   };
 
-  // Total bill calculation
   const totalBill = menuItems.reduce((sum, item) => sum + (item.price || 0), 0);
 
   return (
@@ -199,7 +207,6 @@ const Room: React.FC = () => {
           <Button variant="ghost" onClick={() => navigate("/rooms")}>Back</Button>
         </div>
 
-        {/* Room Menu */}
         {menuItems.length > 0 && (
           <div className="mt-2 space-y-1">
             {menuItems.map((item) => (
@@ -215,8 +222,8 @@ const Room: React.FC = () => {
       </header>
 
       <div className="flex-1 overflow-y-auto mb-4 space-y-2">
-        {sortedMessages.map((msg, idx) => (
-          <Card key={idx} className="p-3">
+        {sortedMessages.map((msg) => (
+          <Card key={msg.id} className="p-3">
             <div className="flex justify-between items-center">
               <span className="font-semibold">{msg.senderName}</span>
               <span className="text-xs text-muted-foreground">
@@ -224,15 +231,12 @@ const Room: React.FC = () => {
               </span>
             </div>
             {msg.text && <p className="mt-1">{msg.text}</p>}
-            {msg.proofUrl && (
-              <img src={msg.proofUrl} alt="proof" className="mt-2 max-h-48" />
-            )}
+            {msg.proofUrl && <img src={msg.proofUrl} alt="proof" className="mt-2 max-h-48" />}
           </Card>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area with improved UX */}
       <div className="flex gap-2 items-center">
         <Input
           placeholder="Type a message..."
@@ -241,7 +245,6 @@ const Room: React.FC = () => {
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
         />
 
-        {/* Custom file input button */}
         <label className="relative cursor-pointer bg-gray-200 text-[10px] hover:bg-gray-300 px-3 py-2 rounded flex items-center gap-1">
           <Paperclip />
           <span>{file ? file.name : "Attach file"}</span>
@@ -261,12 +264,7 @@ const Room: React.FC = () => {
           )}
         </label>
 
-        <Button
-          onClick={handleSend}
-          disabled={!input.trim() && !file} // Send enabled if either exists
-        >
-          Send
-        </Button>
+        <Button onClick={handleSend} disabled={!input.trim() && !file}>Send</Button>
       </div>
     </div>
   );
