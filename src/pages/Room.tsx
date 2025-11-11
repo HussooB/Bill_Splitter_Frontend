@@ -16,6 +16,7 @@ interface Message {
   text?: string;
   proofUrl?: string;
   createdAt: string;
+  roomId?: string;
 }
 
 interface MenuItem {
@@ -28,7 +29,7 @@ const Room: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const [socket, setSocket] = useState<Socket | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -46,7 +47,7 @@ const Room: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- Fetch room info & past messages ---
+  // Fetch room and messages
   useEffect(() => {
     if (!token) {
       toast({ title: "Unauthorized", description: "Please log in." });
@@ -92,7 +93,11 @@ const Room: React.FC = () => {
               proofUrl: msg.proofUrl || msg.fileUrl,
               createdAt: msg.createdAt || new Date().toISOString(),
             }))
-            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+            .sort(
+              (a: Message, b: Message) =>
+                new Date(a.createdAt).getTime() -
+                new Date(b.createdAt).getTime()
+            )
         );
       } catch (err) {
         console.error(err);
@@ -103,11 +108,11 @@ const Room: React.FC = () => {
     fetchMessages();
   }, [roomId, token, toast, navigate]);
 
-  // --- Socket setup ---
+  // Setup socket.io
   useEffect(() => {
     if (!token) return;
 
-    const s = io(SOCKET_URL, {
+    const s: Socket = io(SOCKET_URL, {
       auth: { token },
       transports: ["websocket"],
     });
@@ -117,55 +122,62 @@ const Room: React.FC = () => {
       s.emit("joinRoom", roomId, displayName);
     });
 
-    s.on("connect_error", (err) => console.error("Socket connect error:", err));
+    s.on("connect_error", (err) =>
+      console.error("Socket connect error:", err)
+    );
 
     // --- Presence events ---
     s.on("userList", (users: string[]) => {
-      // show "You" for yourself, remove duplicates
       const filtered = users.filter((u) => u !== displayName);
       setOnlineUsers(filtered);
     });
 
     s.on("userJoined", (name: string) => {
-      if (name !== displayName) {
+      if (name !== displayName)
         toast({ title: `${name} joined the room` });
-      }
     });
 
     s.on("userLeft", (name: string) => {
-      if (name !== displayName) {
+      if (name !== displayName)
         toast({ title: `${name} left the room` });
-      }
     });
 
     // --- Message events ---
     s.on("receiveMessage", (msg: Message) => {
       setMessages((prev) => [
         ...prev,
-        { ...msg, senderName: msg.senderName === displayName ? "You" : msg.senderName },
+        {
+          ...msg,
+          senderName:
+            msg.senderName === displayName ? "You" : msg.senderName,
+        },
       ]);
     });
 
     s.on("receiveProof", (proof: Message) => {
       setMessages((prev) => [
         ...prev,
-        { ...proof, senderName: proof.senderName === displayName ? "You" : proof.senderName },
+        {
+          ...proof,
+          senderName:
+            proof.senderName === displayName ? "You" : proof.senderName,
+        },
       ]);
     });
 
     setSocket(s);
-
     return () => {
       s.disconnect();
     };
   }, [roomId, token, displayName, toast]);
 
-  // --- Send messages & files ---
+  // --- Send messages or files ---
   const handleSend = async () => {
     if (!socket || (!input.trim() && !file)) return;
 
+    // Text message
     if (input.trim()) {
-      const msg = {
+      const msg: Message = {
         id: crypto.randomUUID(),
         senderName: displayName,
         text: input.trim(),
@@ -177,6 +189,7 @@ const Room: React.FC = () => {
       setInput("");
     }
 
+    // File message
     if (file) {
       const formData = new FormData();
       formData.append("file", file);
@@ -190,7 +203,7 @@ const Room: React.FC = () => {
         if (!res.ok) throw new Error("Failed to upload file");
         const data = await res.json();
 
-        const proofMsg = {
+        const proofMsg: Message = {
           id: data.proof.id,
           senderName: displayName,
           proofUrl: data.proof.fileUrl,
@@ -199,17 +212,26 @@ const Room: React.FC = () => {
         };
 
         socket.emit("sendProof", proofMsg);
-        setMessages((prev) => [...prev, { ...proofMsg, senderName: "You" }]);
+        setMessages((prev) => [
+          ...prev,
+          { ...proofMsg, senderName: "You" },
+        ]);
         setFile(null);
         toast({ title: "File sent!" });
       } catch (err: any) {
         console.error(err);
-        toast({ title: "Error sending file", description: err.message });
+        toast({
+          title: "Error sending file",
+          description: err.message,
+        });
       }
     }
   };
 
-  const totalBill = menuItems.reduce((sum, item) => sum + (item.price || 0), 0);
+  const totalBill = menuItems.reduce(
+    (sum, item) => sum + (item.price || 0),
+    0
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
@@ -221,7 +243,7 @@ const Room: React.FC = () => {
           </Button>
         </div>
 
-        {/* 🧍 Online users */}
+        {/* Online users */}
         <div className="mt-2 text-sm text-muted-foreground">
           <strong>Online:</strong> You
           {onlineUsers.length ? ", " + onlineUsers.join(", ") : ""}
@@ -241,6 +263,7 @@ const Room: React.FC = () => {
         )}
       </header>
 
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto mb-4 space-y-2">
         {messages.map((msg) => (
           <Card key={msg.id} className="p-3">
@@ -263,6 +286,7 @@ const Room: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Input bar */}
       <div className="flex gap-2 items-center">
         <Input
           placeholder="Type a message..."
@@ -272,16 +296,20 @@ const Room: React.FC = () => {
         />
 
         <label className="relative cursor-pointer bg-gray-200 text-[10px] hover:bg-gray-300 px-3 py-2 rounded flex items-center gap-1">
-          <Paperclip />
+          <Paperclip size={14} />
           <span>{file ? file.name : "Attach file"}</span>
           <input
             type="file"
             className="absolute inset-0 opacity-0 cursor-pointer"
-            onChange={(e) => e.target.files && setFile(e.target.files[0])}
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0])
+                setFile(e.target.files[0]);
+            }}
           />
           {file && (
             <X
-              className="ml-2"
+              className="ml-2 cursor-pointer"
+              size={14}
               onClick={(e) => {
                 e.stopPropagation();
                 setFile(null);
