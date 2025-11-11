@@ -16,6 +16,7 @@ interface Message {
   text?: string;
   proofUrl?: string;
   createdAt: string;
+  roomId?: string;
 }
 
 interface MenuItem {
@@ -41,12 +42,12 @@ const Room: React.FC = () => {
 
   const token = localStorage.getItem("token");
 
-  // Scroll to bottom whenever messages change
+  // Scroll to bottom when new messages appear
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch room info & messages
+  // Fetch room info & previous messages
   useEffect(() => {
     if (!token) {
       toast({ title: "Unauthorized", description: "Please log in." });
@@ -107,7 +108,7 @@ const Room: React.FC = () => {
     fetchMessages();
   }, [roomId, token, toast, navigate]);
 
-  // Setup socket
+  // --- Setup socket.io ---
   useEffect(() => {
     if (!token) return;
 
@@ -125,74 +126,62 @@ const Room: React.FC = () => {
       console.error("Socket connect error:", err)
     );
 
-    // Presence
+    // --- Presence ---
     s.on("userList", (users: string[]) => {
       const filtered = users.filter((u) => u !== displayName);
       setOnlineUsers(filtered);
     });
 
     s.on("userJoined", (name: string) => {
-      toast({ title: `${name} joined the room` });
+      if (name !== displayName) toast({ title: `${name} joined the room` });
     });
 
     s.on("userLeft", (name: string) => {
-      toast({ title: `${name} left the room` });
+      if (name !== displayName) toast({ title: `${name} left the room` });
     });
 
-    // Message events
+    // --- Message events ---
     s.on("receiveMessage", (msg: Message) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev; // prevent duplicates
-        return [
-          ...prev,
-          {
-            ...msg,
-            senderName:
-              msg.senderName === displayName ? "You" : msg.senderName,
-          },
-        ];
-      });
+      if (msg.senderName === displayName) return; // skip own messages
+      setMessages((prev) =>
+        prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
+      );
     });
 
     s.on("receiveProof", (proof: Message) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === proof.id)) return prev; // prevent duplicates
-        return [
-          ...prev,
-          {
-            ...proof,
-            senderName:
-              proof.senderName === displayName ? "You" : proof.senderName,
-          },
-        ];
-      });
+      if (proof.senderName === displayName) return; // skip own proofs
+      setMessages((prev) =>
+        prev.some((m) => m.id === proof.id) ? prev : [...prev, proof]
+      );
     });
 
     setSocket(s);
-
     return () => {
       s.disconnect();
     };
   }, [roomId, token, displayName, toast]);
 
-  // Send message or file
+  // --- Send message or file ---
   const handleSend = async () => {
     if (!socket || (!input.trim() && !file)) return;
 
-    // Text message
+    // --- Send text message ---
     if (input.trim()) {
-      const msg = {
+      const msg: Message = {
         id: crypto.randomUUID(),
         senderName: displayName,
         text: input.trim(),
         createdAt: new Date().toISOString(),
         roomId,
       };
+
+      // Add locally first
+      setMessages((prev) => [...prev, msg]);
       socket.emit("sendMessage", msg);
       setInput("");
     }
 
-    // File message
+    // --- Send file proof ---
     if (file) {
       const formData = new FormData();
       formData.append("file", file);
@@ -206,7 +195,7 @@ const Room: React.FC = () => {
         if (!res.ok) throw new Error("Failed to upload file");
         const data = await res.json();
 
-        const proofMsg = {
+        const proofMsg: Message = {
           id: data.proof.id,
           senderName: displayName,
           proofUrl: data.proof.fileUrl,
@@ -214,15 +203,14 @@ const Room: React.FC = () => {
           roomId,
         };
 
+        // Add locally first
+        setMessages((prev) => [...prev, proofMsg]);
         socket.emit("sendProof", proofMsg);
         setFile(null);
         toast({ title: "File sent!" });
       } catch (err: any) {
         console.error(err);
-        toast({
-          title: "Error sending file",
-          description: err.message,
-        });
+        toast({ title: "Error sending file", description: err.message });
       }
     }
   };
@@ -265,9 +253,16 @@ const Room: React.FC = () => {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto mb-4 space-y-2">
         {messages.map((msg) => (
-          <Card key={msg.id} className="p-3">
+          <Card
+            key={msg.id}
+            className={`p-3 ${
+              msg.senderName === displayName ? "bg-primary/10" : ""
+            }`}
+          >
             <div className="flex justify-between items-center">
-              <span className="font-semibold">{msg.senderName}</span>
+              <span className="font-semibold">
+                {msg.senderName === displayName ? "You" : msg.senderName}
+              </span>
               <span className="text-xs text-muted-foreground">
                 {new Date(msg.createdAt).toLocaleTimeString()}
               </span>
