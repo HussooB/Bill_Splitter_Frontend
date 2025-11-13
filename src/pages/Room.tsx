@@ -42,6 +42,15 @@ const Room: React.FC = () => {
 
   const token = localStorage.getItem("token");
 
+  // helper to normalize online users safely
+  const normalizeUserList = (users: string[]) => {
+    // remove blanks, duplicates, and self from the array
+    const clean = Array.from(
+      new Set(users.filter((u) => u && u.trim() && u !== displayName))
+    );
+    return clean;
+  };
+
   // Scroll to bottom when new messages appear
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -128,16 +137,19 @@ const Room: React.FC = () => {
 
     // --- Presence ---
     s.on("userList", (users: string[]) => {
-      const filtered = users.filter((u) => u !== displayName);
-      setOnlineUsers(filtered);
+      // normalize + deduplicate + ensure your own name not duplicated
+      setOnlineUsers(normalizeUserList(users));
     });
 
     s.on("userJoined", (name: string) => {
-      if (name !== displayName) toast({ title: `${name} joined the room` });
+      if (name !== displayName)
+        toast({ title: `${name} joined the room` });
     });
 
     s.on("userLeft", (name: string) => {
-      if (name !== displayName) toast({ title: `${name} left the room` });
+      if (name !== displayName)
+        toast({ title: `${name} left the room` });
+      setOnlineUsers((prev) => normalizeUserList(prev.filter((u) => u !== name)));
     });
 
     // --- Message events ---
@@ -149,7 +161,6 @@ const Room: React.FC = () => {
     });
 
     s.on("receiveProof", (proof: Message) => {
-      // ✅ prevent duplicates for files too
       setMessages((prev) =>
         prev.some((m) => m.id === proof.id) ? prev : [...prev, proof]
       );
@@ -165,7 +176,6 @@ const Room: React.FC = () => {
   const handleSend = async () => {
     if (!socket || (!input.trim() && !file)) return;
 
-    // --- Send text message ---
     if (input.trim()) {
       const msg: Message = {
         id: crypto.randomUUID(),
@@ -174,18 +184,14 @@ const Room: React.FC = () => {
         createdAt: new Date().toISOString(),
         roomId,
       };
-
-      // Add locally first
       setMessages((prev) => [...prev, msg]);
       socket.emit("sendMessage", msg);
       setInput("");
     }
 
-    // --- Send file proof ---
     if (file) {
       const formData = new FormData();
       formData.append("file", file);
-
       try {
         const res = await fetch(`${API_URL}/proofs/${roomId}`, {
           method: "POST",
@@ -203,7 +209,6 @@ const Room: React.FC = () => {
           roomId,
         };
 
-        // ✅ Don't re-add if socket will send it back
         socket.emit("sendProof", proofMsg);
         setMessages((prev) =>
           prev.some((m) => m.id === proofMsg.id)
