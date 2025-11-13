@@ -44,7 +44,6 @@ const Room: React.FC = () => {
 
   // helper to normalize online users safely
   const normalizeUserList = (users: string[]) => {
-    // remove blanks, duplicates, and self from the array
     const clean = Array.from(
       new Set(users.filter((u) => u && u.trim() && u !== displayName))
     );
@@ -137,7 +136,6 @@ const Room: React.FC = () => {
 
     // --- Presence ---
     s.on("userList", (users: string[]) => {
-      // normalize + deduplicate + ensure your own name not duplicated
       setOnlineUsers(normalizeUserList(users));
     });
 
@@ -154,7 +152,7 @@ const Room: React.FC = () => {
 
     // --- Message events ---
     s.on("receiveMessage", (msg: Message) => {
-      if (msg.senderName === displayName) return; // skip own messages
+      if (msg.senderName === displayName) return;
       setMessages((prev) =>
         prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
       );
@@ -225,10 +223,12 @@ const Room: React.FC = () => {
     }
   };
 
-  const totalBill = menuItems.reduce(
-    (sum, item) => sum + (item.price || 0),
-    0
-  );
+  // --- Bill calculation ---
+  const totalBill = menuItems.reduce((sum, item) => sum + (item.price || 0), 0);
+
+  // include current user + others
+  const totalParticipants = 1 + onlineUsers.length;
+  const eachShare = totalParticipants > 0 ? totalBill / totalParticipants : totalBill;
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
@@ -255,6 +255,11 @@ const Room: React.FC = () => {
             ))}
             <p className="font-bold text-muted-foreground">
               Total: ${totalBill.toFixed(2)}
+            </p>
+            <p className="text-sm text-primary font-medium">
+              {totalParticipants === 1
+                ? `You’re alone — total is $${eachShare.toFixed(2)}`
+                : `Each person pays: $${eachShare.toFixed(2)} (${totalParticipants} people)`}
             </p>
           </div>
         )}
