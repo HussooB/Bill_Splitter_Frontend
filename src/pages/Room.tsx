@@ -42,20 +42,15 @@ const Room: React.FC = () => {
 
   const token = localStorage.getItem("token");
 
-  // helper to normalize online users safely
-  const normalizeUserList = (users: string[]) => {
-    const clean = Array.from(
-      new Set(users.filter((u) => u && u.trim() && u !== displayName))
-    );
-    return clean;
-  };
+  const normalizeUserList = (users: string[]) =>
+    Array.from(new Set(users.filter((u) => u && u.trim() && u !== displayName)));
 
-  // Scroll to bottom when new messages appear
+  // autoscroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch room info & previous messages
+  // fetch room + messages
   useEffect(() => {
     if (!token) {
       toast({ title: "Unauthorized", description: "Please log in." });
@@ -70,6 +65,7 @@ const Room: React.FC = () => {
         });
         if (!res.ok) throw new Error("Failed to fetch room");
         const data = await res.json();
+
         const room = data.room;
         setRoomTitle(room.title);
         setMenuItems(
@@ -92,6 +88,7 @@ const Room: React.FC = () => {
         });
         if (!res.ok) throw new Error("Failed to fetch messages");
         const data = await res.json();
+
         setMessages(
           data.messages
             .map((msg: any) => ({
@@ -116,61 +113,58 @@ const Room: React.FC = () => {
     fetchMessages();
   }, [roomId, token, toast, navigate]);
 
-  // --- Setup socket.io ---
-  useEffect(() => {
-    if (!token) return;
+  // ------------------ SOCKET LOGIC ------------------
+  
+  useEffect((): (() => void) => {
+  if (!token) return () => {}; // Return empty cleanup if no token
 
-    const s = io(SOCKET_URL, {
-      auth: { token },
-      transports: ["websocket"],
-    });
+  // Initialize socket
+  const s: Socket = io(SOCKET_URL, {
+    auth: { token },
+    transports: ["websocket"],
+  });
 
-    s.on("connect", () => {
-      console.log("Socket connected:", s.id);
-      s.emit("joinRoom", roomId, displayName);
-    });
+  // Connect
+  s.on("connect", () => {
+    console.log("Socket connected:", s.id);
+    s.emit("joinRoom", roomId, displayName);
+  });
 
-    s.on("connect_error", (err) =>
-      console.error("Socket connect error:", err)
+  s.on("connect_error", (err) => console.error("Socket connect error:", err));
+
+  // User list updates
+  s.on("userList", (users: string[]) => setOnlineUsers(normalizeUserList(users)));
+
+  s.on("userJoined", (name: string) => {
+    if (name !== displayName) toast({ title: `${name} joined the room` });
+  });
+
+  s.on("userLeft", (name: string) => {
+    if (name !== displayName) toast({ title: `${name} left the room` });
+    setOnlineUsers((prev) => normalizeUserList(prev.filter((u) => u !== name)));
+  });
+
+  // Messages
+  s.on("receiveMessage", (msg: Message) => {
+    if (msg.senderName === displayName) return;
+    setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+  });
+
+  s.on("receiveProof", (proof: Message) => {
+    setMessages((prev) =>
+      prev.some((m) => m.id === proof.id) ? prev : [...prev, proof]
     );
+  });
 
-    // --- Presence ---
-    s.on("userList", (users: string[]) => {
-      setOnlineUsers(normalizeUserList(users));
-    });
+  setSocket(s);
 
-    s.on("userJoined", (name: string) => {
-      if (name !== displayName)
-        toast({ title: `${name} joined the room` });
-    });
+  // Cleanup function
+  return () => {
+    s.disconnect();
+  };
+}, [roomId, token, displayName, toast]);
 
-    s.on("userLeft", (name: string) => {
-      if (name !== displayName)
-        toast({ title: `${name} left the room` });
-      setOnlineUsers((prev) => normalizeUserList(prev.filter((u) => u !== name)));
-    });
-
-    // --- Message events ---
-    s.on("receiveMessage", (msg: Message) => {
-      if (msg.senderName === displayName) return;
-      setMessages((prev) =>
-        prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
-      );
-    });
-
-    s.on("receiveProof", (proof: Message) => {
-      setMessages((prev) =>
-        prev.some((m) => m.id === proof.id) ? prev : [...prev, proof]
-      );
-    });
-
-    setSocket(s);
-    return () => {
-      s.disconnect();
-    };
-  }, [roomId, token, displayName, toast]);
-
-  // --- Send message or file ---
+  // ------------------ SEND MESSAGE / FILE ------------------
   const handleSend = async () => {
     if (!socket || (!input.trim() && !file)) return;
 
@@ -190,6 +184,7 @@ const Room: React.FC = () => {
     if (file) {
       const formData = new FormData();
       formData.append("file", file);
+
       try {
         const res = await fetch(`${API_URL}/proofs/${roomId}`, {
           method: "POST",
@@ -197,8 +192,8 @@ const Room: React.FC = () => {
           body: formData,
         });
         if (!res.ok) throw new Error("Failed to upload file");
-        const data = await res.json();
 
+        const data = await res.json();
         const proofMsg: Message = {
           id: data.proof.id,
           senderName: displayName,
@@ -209,9 +204,7 @@ const Room: React.FC = () => {
 
         socket.emit("sendProof", proofMsg);
         setMessages((prev) =>
-          prev.some((m) => m.id === proofMsg.id)
-            ? prev
-            : [...prev, proofMsg]
+          prev.some((m) => m.id === proofMsg.id) ? prev : [...prev, proofMsg]
         );
 
         setFile(null);
@@ -223,112 +216,136 @@ const Room: React.FC = () => {
     }
   };
 
-  // --- Bill calculation ---
   const totalBill = menuItems.reduce((sum, item) => sum + (item.price || 0), 0);
-
-  // include current user + others
   const totalParticipants = 1 + onlineUsers.length;
   const eachShare = totalParticipants > 0 ? totalBill / totalParticipants : totalBill;
 
-  return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
-      <header className="mb-4">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">{roomTitle}</h1>
-          <Button variant="ghost" onClick={() => navigate("/rooms")}>
-            Back
-          </Button>
+  // ------------------ UI ------------------
+// ------------------ UI ------------------
+return (
+  <div className="min-h-screen flex flex-col bg-gradient-to-br from-primary/10 via-background/5 to-accent/10 p-4">
+
+    {/* Room Title */}
+    <header className="mb-4 relative flex flex-col items-center">
+      <h1
+        className="text-5xl font-extrabold text-primary mb-4"
+        style={{ fontFamily: "'Berkshire Swash', cursive" }}
+      >
+        {roomTitle || "Room"}
+      </h1>
+
+      <div className="absolute top-0 right-0 mt-2 mr-2">
+        <Button variant="outline" size="sm" onClick={() => navigate("/rooms")}>
+          Back
+        </Button>
+      </div>
+
+      {/* Online users + Items Selected */}
+      <div className="flex justify-between items-start gap-2 w-full px-2">
+        {/* Online box */}
+        <div className="bg-green-50 text-green-700 rounded-lg px-4 py-2 border border-green-200 shadow-sm text-base min-w-[150px]">
+          <span className="font-semibold">Online:</span>{" "}
+          <span>
+            You{onlineUsers.length ? ", " + onlineUsers.join(", ") : ""}
+          </span>
         </div>
 
-        {/* Online users */}
-        <div className="mt-2 text-sm text-muted-foreground">
-          <strong>Online:</strong> You
-          {onlineUsers.length ? ", " + onlineUsers.join(", ") : ""}
-        </div>
-
+        {/* Items Selected box */}
         {menuItems.length > 0 && (
-          <div className="mt-2 space-y-1">
+          <div className="bg-yellow-50 border border-yellow-200 shadow-sm rounded-lg flex-1 max-w-[70%] p-4 text-center">
+            <p className="font-semibold text-lg text-yellow-700 mb-2">Items Selected</p>
             {menuItems.map((item) => (
               <p key={item.id} className="text-sm text-muted-foreground">
                 {item.name}: ${item.price.toFixed(2)}
               </p>
             ))}
-            <p className="font-bold text-muted-foreground">
+            <p className="mt-2 text-base font-semibold text-yellow-700">
               Total: ${totalBill.toFixed(2)}
-            </p>
-            <p className="text-sm text-primary font-medium">
-              {totalParticipants === 1
-                ? `You’re alone — total is $${eachShare.toFixed(2)}`
-                : `Each person pays: $${eachShare.toFixed(2)} (${totalParticipants} people)`}
             </p>
           </div>
         )}
-      </header>
+      </div>
+    </header>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto mb-4 space-y-2">
-        {messages.map((msg) => (
-          <Card
-            key={msg.id}
-            className={`p-3 ${
-              msg.senderName === displayName ? "bg-primary/10" : ""
-            }`}
-          >
-            <div className="flex justify-between items-center">
-              <span className="font-semibold">
-                {msg.senderName === displayName ? "You" : msg.senderName}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(msg.createdAt).toLocaleTimeString()}
-              </span>
+    {/* Messages */}
+    <div className="flex-1 overflow-y-auto mb-4 px-2">
+      <div className="space-y-3 max-w-5xl mx-auto">
+        {messages.map((msg) => {
+          const isMine = msg.senderName === displayName;
+          return (
+            <div
+              key={msg.id}
+              className={`flex w-full ${isMine ? "justify-end" : "justify-start"}`}
+            >
+              <Card
+                className={`p-2 w-full md:w-[60%] border text-sm ${
+                  isMine
+                    ? "bg-primary/80 text-white border-primary/70 rounded-tr-2xl rounded-bl-2xl shadow-md"
+                    : "bg-green-100 text-green-900 border-green-200 rounded-tl-2xl rounded-br-2xl shadow-sm"
+                }`}
+              >
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-semibold text-sm">
+                    {isMine ? "You" : msg.senderName}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(msg.createdAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+
+                {msg.text && <p className="mt-1">{msg.text}</p>}
+                {msg.proofUrl && (
+                  <img
+                    src={msg.proofUrl}
+                    alt="proof"
+                    className="mt-2 max-h-52 rounded border border-muted/50 object-contain"
+                  />
+                )}
+              </Card>
             </div>
-            {msg.text && <p className="mt-1">{msg.text}</p>}
-            {msg.proofUrl && (
-              <img
-                src={msg.proofUrl}
-                alt="proof"
-                className="mt-2 max-h-48 rounded border"
-              />
-            )}
-          </Card>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
-
-      {/* Input bar */}
-      <div className="flex gap-2 items-center">
-        <Input
-          placeholder="Type a message..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
-        />
-
-        <label className="relative cursor-pointer bg-gray-200 text-[10px] hover:bg-gray-300 px-3 py-2 rounded flex items-center gap-1">
-          <Paperclip />
-          <span>{file ? file.name : "Attach file"}</span>
-          <input
-            type="file"
-            className="absolute inset-0 opacity-0 cursor-pointer"
-            onChange={(e) => e.target.files && setFile(e.target.files[0])}
-          />
-          {file && (
-            <X
-              className="ml-2"
-              onClick={(e) => {
-                e.stopPropagation();
-                setFile(null);
-              }}
-            />
-          )}
-        </label>
-
-        <Button onClick={handleSend} disabled={!input.trim() && !file}>
-          Send
-        </Button>
-      </div>
     </div>
-  );
+
+    {/* Input bar */}
+    <div className="flex gap-2 items-center max-w-5xl mx-auto w-full bg-white border-t border-muted/30 p-2 rounded-tl-lg rounded-tr-lg shadow-md">
+      <Input
+        placeholder="Type a message..."
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && handleSend()}
+        className="flex-1"
+      />
+      <label className="relative cursor-pointer bg-gray-100 hover:bg-gray-200 text-[10px] px-3 py-2 rounded flex items-center gap-1 border border-gray-300 shadow-sm">
+        <Paperclip size={14} />
+        <span>{file ? file.name : "Attach"}</span>
+        <input
+          type="file"
+          className="absolute inset-0 opacity-0 cursor-pointer"
+          onChange={(e) => e.target.files && setFile(e.target.files[0])}
+        />
+        {file && (
+          <X
+            className="ml-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              setFile(null);
+            }}
+          />
+        )}
+      </label>
+      <Button onClick={handleSend} disabled={!input.trim() && !file}>
+        Send
+      </Button>
+    </div>
+  </div>
+);
+
 };
 
 export default Room;
