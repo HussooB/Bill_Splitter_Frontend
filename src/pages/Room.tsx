@@ -219,76 +219,128 @@ const Room: React.FC = () => {
   const totalBill = menuItems.reduce((sum, item) => sum + (item.price || 0), 0);
   const totalParticipants = 1 + onlineUsers.length;
   const eachShare = totalParticipants > 0 ? totalBill / totalParticipants : totalBill;
+// Hash username → stable color index (0–9)
+const userColorMap: Record<string, string> = {};
+
+const COLORS = [
+  "from-purple-200 to-purple-300 border-purple-400 text-purple-900",
+  "from-orange-200 to-orange-300 border-orange-400 text-orange-900",
+  "from-teal-200 to-teal-300 border-teal-400 text-teal-900",
+  "from-pink-200 to-pink-300 border-pink-400 text-pink-900",
+  "from-red-200 to-red-300 border-red-400 text-red-900",
+  "from-indigo-200 to-indigo-300 border-indigo-400 text-indigo-900",
+  "from-amber-200 to-amber-300 border-amber-400 text-amber-900",
+  "from-cyan-200 to-cyan-300 border-cyan-400 text-cyan-900",
+  "from-lime-200 to-lime-300 border-lime-400 text-lime-900",
+  "from-rose-200 to-rose-300 border-rose-400 text-rose-900"
+];
+
+// Assign a color based on name
+function getColorForUser(name: string) {
+  if (userColorMap[name]) return userColorMap[name];
+
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  const index = Math.abs(hash % COLORS.length);
+  userColorMap[name] = COLORS[index];
+  return COLORS[index];
+}
 
   // ------------------ UI ------------------
-// ------------------ UI ------------------
+// ------------------- UI -------------------
 return (
-  <div className="min-h-screen flex flex-col bg-gradient-to-br from-primary/10 via-background/5 to-accent/10 p-4">
+  <div className="min-h-screen flex flex-col bg-gradient-to-b from-white to-blue-50 p-5">
 
-    {/* Room Title */}
-    <header className="mb-4 relative flex flex-col items-center">
-      <h1
-        className="text-5xl font-extrabold text-primary mb-4"
-        style={{ fontFamily: "'Berkshire Swash', cursive" }}
-      >
-        {roomTitle || "Room"}
-      </h1>
+    {/* ===== ROOM TITLE ===== */}
+    <h1
+      className="text-5xl font-extrabold text-center mb-8 text-blue-700 drop-shadow"
+      style={{ fontFamily: "'Berkshire Swash', cursive" }}
+    >
+      {roomTitle || "Room"}
+    </h1>
 
-      <div className="absolute top-0 right-0 mt-2 mr-2">
-        <Button variant="outline" size="sm" onClick={() => navigate("/rooms")}>
-          Back
-        </Button>
+    {/* ===== TOP BAR ===== */}
+    <div className="w-full max-w-5xl mx-auto flex items-start justify-between gap-6 mb-6">
+
+      {/* ---- ONLINE BOX ---- */}
+      <div className="w-1/3 bg-green-100 border border-green-300 rounded-2xl p-5 shadow-lg">
+        <p className="font-semibold text-xl text-green-700 mb-2">Online</p>
+
+        <p className="text-green-900 text-base leading-relaxed">
+          <span className="font-bold">You</span>
+          {onlineUsers.length ? ", " + onlineUsers.join(", ") : ""}
+        </p>
+
+        <p className="font-semibold mt-3 text-green-800">
+          Total: {1 + onlineUsers.length}
+        </p>
       </div>
 
-      {/* Online users + Items Selected */}
-      <div className="flex justify-between items-start gap-2 w-full px-2">
-        {/* Online box */}
-        <div className="bg-green-50 text-green-700 rounded-lg px-4 py-2 border border-green-200 shadow-sm text-base min-w-[150px]">
-          <span className="font-semibold">Online:</span>{" "}
-          <span>
-            You{onlineUsers.length ? ", " + onlineUsers.join(", ") : ""}
-          </span>
-        </div>
+      {/* ---- ITEMS SELECTED ---- */}
+      {menuItems.length > 0 && (
+        <div className="w-2/3 bg-yellow-50 border border-yellow-300 rounded-2xl p-5 shadow-lg">
+          <p className="font-semibold text-xl text-yellow-700 mb-3">
+            Items Selected
+          </p>
 
-        {/* Items Selected box */}
-        {menuItems.length > 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 shadow-sm rounded-lg flex-1 max-w-[70%] p-4 text-center">
-            <p className="font-semibold text-lg text-yellow-700 mb-2">Items Selected</p>
-            {menuItems.map((item) => (
-              <p key={item.id} className="text-sm text-muted-foreground">
-                {item.name}: ${item.price.toFixed(2)}
-              </p>
-            ))}
-            <p className="mt-2 text-base font-semibold text-yellow-700">
-              Total: ${totalBill.toFixed(2)}
+          {/* Inline items (comma separated) */}
+          <p className="text-md font-semibold text-gray-800 mb-4">
+            {menuItems.map((i) => `${i.name} (${i.price.toFixed(2)} birr)`).join(", ")} 
+          </p>
+
+          <div className="flex justify-between items-center pt-3 border-t border-yellow-300">
+            <p className="text-lg font-bold text-yellow-700">
+              Total: {totalBill.toFixed(2)} birr
+            </p>
+            <p className="text-md font-bold text-yellow-600">
+              Each User Pays: {(totalBill / (onlineUsers.length + 1)).toFixed(2)} birr
             </p>
           </div>
-        )}
-      </div>
-    </header>
+        </div>
+      )}
+    </div>
 
-    {/* Messages */}
-    <div className="flex-1 overflow-y-auto mb-4 px-2">
-      <div className="space-y-3 max-w-5xl mx-auto">
+    {/* ===== MESSAGES SECTION ===== */}
+    <div className="flex-1 overflow-y-auto px-2 w-full max-w-4xl mx-auto">
+      <div className="space-y-5">
+
         {messages.map((msg) => {
           const isMine = msg.senderName === displayName;
+          const avatar = isMine ? "Y" : msg.senderName.charAt(0).toUpperCase();
+          const bubbleColor = isMine
+            ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-300 rounded-br-none"
+            : `bg-gradient-to-br ${getColorForUser(msg.senderName)} rounded-bl-none`;
+
+          const avatarColor = isMine
+            ? "bg-blue-200 text-blue-700"
+            : "bg-green-300 text-green-900";
+
           return (
             <div
               key={msg.id}
-              className={`flex w-full ${isMine ? "justify-end" : "justify-start"}`}
+              className={`flex w-full items-end gap-2 ${
+                isMine ? "justify-end" : "justify-start"
+              } animate-[fadeInUp_0.3s_ease]`}
             >
-              <Card
-                className={`p-2 w-full md:w-[60%] border text-sm ${
-                  isMine
-                    ? "bg-primary/80 text-white border-primary/70 rounded-tr-2xl rounded-bl-2xl shadow-md"
-                    : "bg-green-100 text-green-900 border-green-200 rounded-tl-2xl rounded-br-2xl shadow-sm"
-                }`}
-              >
+
+              {/* Avatar */}
+              {!isMine && (
+                <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center shadow ${avatarColor}`}>
+                  {avatar}
+                </div>
+              )}
+
+              {/* Bubble */}
+              <div className={`p-4 max-w-[75%] rounded-3xl shadow-lg border ${bubbleColor}`}>
+                {/* Header */}
                 <div className="flex justify-between items-center mb-1">
-                  <span className="font-semibold text-sm">
+                  <span className="font-semibold mr-1 text-sm">
                     {isMine ? "You" : msg.senderName}
                   </span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs opacity-75">
                     {new Date(msg.createdAt).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -296,24 +348,40 @@ return (
                   </span>
                 </div>
 
-                {msg.text && <p className="mt-1">{msg.text}</p>}
+                {/* Message */}
+                {msg.text && (
+                  <p className="mt-1 text-sm leading-relaxed">
+                    {msg.text}
+                  </p>
+                )}
+
+                {/* Attachment */}
                 {msg.proofUrl && (
                   <img
                     src={msg.proofUrl}
-                    alt="proof"
-                    className="mt-2 max-h-52 rounded border border-muted/50 object-contain"
+                    alt="attachment"
+                    className="mt-3 max-h-60 rounded-lg border object-contain shadow-sm"
                   />
                 )}
-              </Card>
+              </div>
+
+              {/* My avatar */}
+              {isMine && (
+                <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center shadow ${avatarColor}`}>
+                  {avatar}
+                </div>
+              )}
             </div>
           );
         })}
+
         <div ref={messagesEndRef} />
       </div>
     </div>
 
-    {/* Input bar */}
-    <div className="flex gap-2 items-center max-w-5xl mx-auto w-full bg-white border-t border-muted/30 p-2 rounded-tl-lg rounded-tr-lg shadow-md">
+    {/* ===== INPUT BAR ===== */}
+    <div className="flex gap-3 items-center max-w-4xl mx-auto w-full bg-white border rounded-2xl p-3 shadow-xl mt-4 mb-2">
+
       <Input
         placeholder="Type a message..."
         value={input}
@@ -321,17 +389,22 @@ return (
         onKeyDown={(e) => e.key === "Enter" && handleSend()}
         className="flex-1"
       />
-      <label className="relative cursor-pointer bg-gray-100 hover:bg-gray-200 text-[10px] px-3 py-2 rounded flex items-center gap-1 border border-gray-300 shadow-sm">
-        <Paperclip size={14} />
-        <span>{file ? file.name : "Attach"}</span>
+
+      {/* File picker */}
+      <label className="relative cursor-pointer bg-gray-100 hover:bg-gray-200 text-xs px-3 py-2 rounded-lg border shadow-sm flex items-center">
+        <Paperclip size={15} />
+        <span className="ml-1">{file ? file.name : "Attach"}</span>
+
         <input
           type="file"
           className="absolute inset-0 opacity-0 cursor-pointer"
           onChange={(e) => e.target.files && setFile(e.target.files[0])}
         />
+
         {file && (
           <X
-            className="ml-2"
+            className="ml-2 text-red-600 cursor-pointer"
+            size={14}
             onClick={(e) => {
               e.stopPropagation();
               setFile(null);
@@ -339,12 +412,18 @@ return (
           />
         )}
       </label>
-      <Button onClick={handleSend} disabled={!input.trim() && !file}>
+
+      <Button
+        onClick={handleSend}
+        disabled={!input.trim() && !file}
+        className="px-6"
+      >
         Send
       </Button>
     </div>
   </div>
 );
+
 
 };
 
